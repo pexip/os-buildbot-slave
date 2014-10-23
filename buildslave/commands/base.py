@@ -15,24 +15,29 @@
 
 
 import os
-from base64 import b64encode
-import sys
 import shutil
+import sys
 
+from base64 import b64encode
+
+from twisted.internet import defer
+from twisted.internet import reactor
+from twisted.internet import threads
+from twisted.python import failure
+from twisted.python import log
+from twisted.python import runtime
 from zope.interface import implements
-from twisted.internet import reactor, defer
-from twisted.python import log, failure, runtime
 
-from buildslave.interfaces import ISlaveCommand
 from buildslave import runprocess
-from buildslave.exceptions import AbandonChain
-from buildslave.commands import utils
 from buildslave import util
+from buildslave.commands import utils
+from buildslave.exceptions import AbandonChain
+from buildslave.interfaces import ISlaveCommand
 
 # this used to be a CVS $-style "Revision" auto-updated keyword, but since I
 # moved to Darcs as the primary repository, this is updated manually each
 # time this file is changed. The last cvs_ver that was here was 1.51 .
-command_version = "2.14"
+command_version = "2.16"
 
 # version history:
 #  >=1.17: commands are interruptable
@@ -63,6 +68,10 @@ command_version = "2.14"
 #  >= 2.12: SlaveShellCommand no longer accepts 'keep_stdin_open'
 #  >= 2.13: SlaveFileUploadCommand supports option 'keepstamp'
 #  >= 2.14: RemoveDirectory can delete multiple directories
+#  >= 2.15: 'interruptSignal' option is added to SlaveShellCommand
+#  >= 2.16: 'sigtermTime' option is added to SlaveShellCommand
+#  >= 2.17: listdir command added to read a directory
+
 
 class Command:
     implements(ISlaveCommand)
@@ -86,6 +95,8 @@ class Command:
     dict that is interpreted per-command.
 
     The setup(args) method is available for setup, and is run from __init__.
+    Mandatory args can be declared by listing them in the requiredArgs property.
+    They will be checked before calling the setup(args) method.
 
     The Command is started with start(). This method must be implemented in a
     subclass, and it should return a Deferred. When your step is done, you
@@ -121,18 +132,24 @@ class Command:
     #  sendStatus(dict) (zero or more)
     #  commandComplete() or commandInterrupted() (one, at end)
 
+    requiredArgs = []
     debug = False
     interrupted = False
-    running = False # set by Builder, cleared on shutdown or when the
+    running = False  # set by Builder, cleared on shutdown or when the
                     # Deferred fires
 
     _reactor = reactor
 
     def __init__(self, builder, stepId, args):
         self.builder = builder
-        self.stepId = stepId # just for logging
+        self.stepId = stepId  # just for logging
         self.args = args
         self.startTime = None
+
+        missingArgs = filter(lambda arg: not arg in args, self.requiredArgs)
+        if missingArgs:
+            raise ValueError("%s is missing args: %s" %
+                             (self.__class__.__name__, ", ".join(missingArgs)))
         self.setup(args)
 
     def setup(self, args):
@@ -143,6 +160,7 @@ class Command:
         self.running = True
         self.startTime = util.now(self._reactor)
         d = defer.maybeDeferred(self.start)
+
         def commandComplete(res):
             self.sendStatus({"elapsed": util.now(self._reactor) - self.startTime})
             self.running = False
@@ -156,7 +174,7 @@ class Command:
         ignored.
 
         This method should be overridden by subclasses."""
-        raise NotImplementedError, "You must implement this in a subclass"
+        raise NotImplementedError("You must implement this in a subclass")
 
     def sendStatus(self, status):
         """Send a status update to the master."""
@@ -180,8 +198,8 @@ class Command:
     # utility methods, mostly used by SlaveShellCommand and the like
 
     def _abandonOnFailure(self, rc):
-        if type(rc) is not int:
-            log.msg("weird, _abandonOnFailure was given rc=%s (%s)" % \
+        if not isinstance(rc, int):
+            log.msg("weird, _abandonOnFailure was given rc=%s (%s)" %
                     (rc, type(rc)))
         assert isinstance(rc, int)
         if rc != 0:
@@ -198,7 +216,9 @@ class Command:
         self.sendStatus({'rc': why.value.args[0]})
         return None
 
+
 class SourceBaseCommand(Command):
+
     """Abstract base class for Version Control System operations (checkout
     and update). This class extracts the following arguments from the
     dictionary received from the master:
@@ -252,7 +272,7 @@ class SourceBaseCommand(Command):
         self.timeout = args.get('timeout', 120)
         self.maxTime = args.get('maxTime', None)
         self.retry = args.get('retry')
-        self.logEnviron = args.get('logEnviron',True)
+        self.logEnviron = args.get('logEnviron', True)
         self._commandPaths = {}
         # VC-specific subclasses should override this to extract more args.
         # Make sure to upcall!
@@ -265,8 +285,8 @@ class SourceBaseCommand(Command):
             try:
                 self._commandPaths[name] = utils.getCommand(name)
             except RuntimeError:
-                self.sendStatus({'stderr' : "could not find '%s'\n" % name})
-                self.sendStatus({'stderr' : "PATH is '%s'\n" % os.environ.get('PATH', '')})
+                self.sendStatus({'stderr': "could not find '%s'\n" % name})
+                self.sendStatus({'stderr': "PATH is '%s'\n" % os.environ.get('PATH', '')})
                 raise AbandonChain(-1)
         return self._commandPaths[name]
 
@@ -276,12 +296,12 @@ class SourceBaseCommand(Command):
 
         # self.srcdir is where the VC system should put the sources
         if self.mode == "copy":
-            self.srcdir = "source" # hardwired directory name, sorry
+            self.srcdir = "source"  # hardwired directory name, sorry
         else:
             self.srcdir = self.workdir
 
         self.sourcedatafile = os.path.join(self.builder.basedir,
-            ".buildbot-sourcedata-" + b64encode(self.srcdir))
+                                           ".buildbot-sourcedata-" + b64encode(self.srcdir))
 
         # upgrade older versions to the new sourcedata location
         old_sd_path = os.path.join(self.builder.basedir, self.srcdir, ".buildbot-sourcedata")
@@ -397,7 +417,7 @@ class SourceBaseCommand(Command):
         raise NotImplementedError("this must be implemented in a subclass")
 
     def maybeDoVCFallback(self, rc):
-        if type(rc) is int and rc == 0:
+        if isinstance(rc, int) and rc == 0:
             return rc
         if self.interrupted:
             raise AbandonChain(1)
@@ -446,10 +466,10 @@ class SourceBaseCommand(Command):
 
         if isinstance(res, failure.Failure):
             if self.interrupted:
-                return res # don't re-try interrupted builds
+                return res  # don't re-try interrupted builds
             res.trap(AbandonChain)
         else:
-            if type(res) is int and res == 0:
+            if isinstance(res, int) and res == 0:
                 return res
             if self.interrupted:
                 raise AbandonChain(1)
@@ -457,7 +477,7 @@ class SourceBaseCommand(Command):
         if self.retry:
             delay, repeats = self.retry
             if repeats >= 0:
-                self.retry = (delay, repeats-1)
+                self.retry = (delay, repeats - 1)
                 msg = ("update failed, trying %d more times after %d seconds"
                        % (repeats, delay))
                 self.sendStatus({'header': msg + "\n"})
@@ -475,34 +495,22 @@ class SourceBaseCommand(Command):
         return res
 
     def doClobber(self, dummy, dirname, chmodDone=False):
-        # TODO: remove the old tree in the background
-##         workdir = os.path.join(self.builder.basedir, self.workdir)
-##         deaddir = self.workdir + ".deleting"
-##         if os.path.isdir(workdir):
-##             try:
-##                 os.rename(workdir, deaddir)
-##                 # might fail if deaddir already exists: previous deletion
-##                 # hasn't finished yet
-##                 # start the deletion in the background
-##                 # TODO: there was a solaris/NetApp/NFS problem where a
-##                 # process that was still running out of the directory we're
-##                 # trying to delete could prevent the rm-rf from working. I
-##                 # think it stalled the rm, but maybe it just died with
-##                 # permission issues. Try to detect this.
-##                 os.commands("rm -rf %s &" % deaddir)
-##             except:
-##                 # fall back to sequential delete-then-checkout
-##                 pass
         d = os.path.join(self.builder.basedir, dirname)
         if runtime.platformType != "posix":
-            # if we're running on w32, use rmtree instead. It will block,
-            # but hopefully it won't take too long.
-            utils.rmdirRecursive(d)
-            return defer.succeed(0)
+            d = threads.deferToThread(utils.rmdirRecursive, d)
+
+            def cb(_):
+                return 0  # rc=0
+
+            def eb(f):
+                self.sendStatus({'header': 'exception from rmdirRecursive\n' + f.getTraceback()})
+                return -1  # rc=-1
+            d.addCallbacks(cb, eb)
+            return d
         command = ["rm", "-rf", d]
         c = runprocess.RunProcess(self.builder, command, self.builder.basedir,
-                         sendRC=0, timeout=self.timeout, maxTime=self.maxTime,
-                         logEnviron=self.logEnviron, usePTY=False)
+                                  sendRC=0, timeout=self.timeout, maxTime=self.maxTime,
+                                  logEnviron=self.logEnviron, usePTY=False)
 
         self.command = c
         # sendRC=0 means the rm command will send stdout/stderr to the
@@ -530,10 +538,10 @@ class SourceBaseCommand(Command):
             # directory for which it doesn't have permission, before changing that
             # permission) by running 'find' instead
             command = ["find", os.path.join(self.builder.basedir, dirname),
-                                '-exec', 'chmod', 'u+rwx', '{}', ';' ]
+                       '-exec', 'chmod', 'u+rwx', '{}', ';']
         c = runprocess.RunProcess(self.builder, command, self.builder.basedir,
-                         sendRC=0, timeout=self.timeout, maxTime=self.maxTime,
-                         logEnviron=self.logEnviron, usePTY=False)
+                                  sendRC=0, timeout=self.timeout, maxTime=self.maxTime,
+                                  logEnviron=self.logEnviron, usePTY=False)
 
         self.command = c
         d = c.start()
@@ -546,12 +554,16 @@ class SourceBaseCommand(Command):
         fromdir = os.path.join(self.builder.basedir, self.srcdir)
         todir = os.path.join(self.builder.basedir, self.workdir)
         if runtime.platformType != "posix":
-            self.sendStatus({'header': "Since we're on a non-POSIX platform, "
-            "we're not going to try to execute cp in a subprocess, but instead "
-            "use shutil.copytree(), which will block until it is complete.  "
-            "fromdir: %s, todir: %s\n" % (fromdir, todir)})
-            shutil.copytree(fromdir, todir)
-            return defer.succeed(0)
+            d = threads.deferToThread(shutil.copytree, fromdir, todir)
+
+            def cb(_):
+                return 0  # rc=0
+
+            def eb(f):
+                self.sendStatus({'header': 'exception from copytree\n' + f.getTraceback()})
+                return -1  # rc=-1
+            d.addCallbacks(cb, eb)
+            return d
 
         if not os.path.exists(os.path.dirname(todir)):
             os.makedirs(os.path.dirname(todir))
@@ -561,8 +573,8 @@ class SourceBaseCommand(Command):
 
         command = ['cp', '-R', '-P', '-p', fromdir, todir]
         c = runprocess.RunProcess(self.builder, command, self.builder.basedir,
-                         sendRC=False, timeout=self.timeout, maxTime=self.maxTime,
-                         logEnviron=self.logEnviron, usePTY=False)
+                                  sendRC=False, timeout=self.timeout, maxTime=self.maxTime,
+                                  logEnviron=self.logEnviron, usePTY=False)
         self.command = c
         d = c.start()
         d.addCallback(self._abandonOnFailure)
@@ -599,12 +611,12 @@ class SourceBaseCommand(Command):
 
         # now apply the patch
         c = runprocess.RunProcess(self.builder, command, dir,
-                         sendRC=False, timeout=self.timeout,
-                         maxTime=self.maxTime, logEnviron=self.logEnviron,
-                         usePTY=False)
+                                  sendRC=False, timeout=self.timeout,
+                                  maxTime=self.maxTime, logEnviron=self.logEnviron,
+                                  usePTY=False)
         self.command = c
         d = c.start()
-        
+
         # clean up the temp file
         def cleanup(x):
             try:

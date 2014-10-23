@@ -15,11 +15,12 @@
 
 import os
 
-from buildslave.commands.base import SourceBaseCommand
 from buildslave import runprocess
+from buildslave.commands.base import SourceBaseCommand
 
 
 class Darcs(SourceBaseCommand):
+
     """Darcs-specific VC operation. In addition to the arguments
     handled by SourceBaseCommand, this command reads the following keys:
 
@@ -27,6 +28,7 @@ class Darcs(SourceBaseCommand):
     """
 
     header = "darcs operation"
+    requiredArgs = ['repourl']
 
     def setup(self, args):
         SourceBaseCommand.setup(self, args)
@@ -48,9 +50,9 @@ class Darcs(SourceBaseCommand):
         d = os.path.join(self.builder.basedir, self.srcdir)
         command = [darcs, 'pull', '--all', '--verbose']
         c = runprocess.RunProcess(self.builder, command, d,
-                         sendRC=False, timeout=self.timeout,
-                         maxTime=self.maxTime, logEnviron=self.logEnviron,
-                         usePTY=False)
+                                  sendRC=False, timeout=self.timeout,
+                                  maxTime=self.maxTime, logEnviron=self.logEnviron,
+                                  usePTY=False)
         self.command = c
         return c.start()
 
@@ -58,7 +60,7 @@ class Darcs(SourceBaseCommand):
         darcs = self.getCommand('darcs')
         # checkout or export
         d = self.builder.basedir
-        command = [darcs, 'get', '--verbose', '--partial',
+        command = [darcs, 'get', '--verbose', '--lazy',
                    '--repo-name', self.srcdir]
         if self.revision:
             # write the context to a file
@@ -72,9 +74,9 @@ class Darcs(SourceBaseCommand):
         command.append(self.repourl)
 
         c = runprocess.RunProcess(self.builder, command, d,
-                         sendRC=False, timeout=self.timeout,
-                         maxTime=self.maxTime, logEnviron=self.logEnviron,
-                         usePTY=False)
+                                  sendRC=False, timeout=self.timeout,
+                                  maxTime=self.maxTime, logEnviron=self.logEnviron,
+                                  usePTY=False)
         self.command = c
         d = c.start()
         if self.revision:
@@ -91,11 +93,11 @@ class Darcs(SourceBaseCommand):
         # we use 'darcs context' to find out what we wound up with
         command = [darcs, "changes", "--context"]
         c = runprocess.RunProcess(self.builder, command,
-                         os.path.join(self.builder.basedir, self.srcdir),
-                         environ=self.env, timeout=self.timeout,
-                         sendStdout=False, sendStderr=False, sendRC=False,
-                         keepStdout=True, logEnviron=self.logEnviron,
-                         usePTY=False)
+                                  os.path.join(self.builder.basedir, self.srcdir),
+                                  environ=self.env, timeout=self.timeout,
+                                  sendStdout=False, sendStderr=False, sendRC=False,
+                                  keepStdout=True, logEnviron=self.logEnviron,
+                                  usePTY=False)
         d = c.start()
         d.addCallback(lambda res: c.stdout)
         return d
