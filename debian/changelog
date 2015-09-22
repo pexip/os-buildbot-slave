@@ -1,6 +1,7 @@
 buildbot-slave (0.8.5-2pexip1) pexip; urgency=low
 
   * Prepare Pexip packaging
+  * git-submodules.patch: improve handling of nested submodules
 
  -- John-Mark Bell <jmb@pexip.com>  Tue, 22 Sep 2015 11:16:49 +0000
 

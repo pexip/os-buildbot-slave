@@ -1,0 +1,25 @@
+diff --git a/buildslave/commands/git.py b/buildslave/commands/git.py
+index b6c80e3..3a81126 100644
+--- a/buildslave/commands/git.py
++++ b/buildslave/commands/git.py
+@@ -89,17 +89,17 @@ class Git(SourceBaseCommand):
+         return True
+ 
+     def _cleanSubmodules(self, res):
+-        command = ['submodule', 'foreach', 'git', 'clean', '-f', '-d']
++        command = ['submodule', 'foreach', '--recursive', 'git', 'clean', '-f', '-d']
+         if self.ignore_ignores:
+             command.append('-x')
+         return self._dovccmd(command)
+ 
+     def _updateSubmodules(self, res):
+-        return self._dovccmd(['submodule', 'update'], self._cleanSubmodules)
++        return self._dovccmd(['submodule', 'update', '--init', '--recursive'], self._cleanSubmodules)
+ 
+     def _initSubmodules(self, res):
+         if self.submodules:
+-            return self._dovccmd(['submodule', 'init'], self._updateSubmodules)
++            return self._dovccmd(['submodule', 'sync'], self._updateSubmodules)
+         else:
+             return defer.succeed(0)
+ 
