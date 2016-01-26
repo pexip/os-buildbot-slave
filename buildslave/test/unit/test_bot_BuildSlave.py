@@ -17,13 +17,16 @@ import os
 import shutil
 import socket
 
-from twisted.trial import unittest
+from twisted.cred import checkers
+from twisted.cred import portal
+from twisted.internet import defer
+from twisted.internet import reactor
 from twisted.spread import pb
-from twisted.internet import reactor, defer
-from twisted.cred import checkers, portal
+from twisted.trial import unittest
 from zope.interface import implements
 
 from buildslave import bot
+from buildslave.test.util import misc
 
 from mock import Mock
 
@@ -31,7 +34,9 @@ from mock import Mock
 # up a TCP connection.  This just tests that the PB code will connect and can
 # execute a basic ping.  The rest is done without TCP (or PB) in other test modules.
 
+
 class MasterPerspective(pb.Avatar):
+
     def __init__(self, on_keepalive=None):
         self.on_keepalive = on_keepalive
 
@@ -40,12 +45,15 @@ class MasterPerspective(pb.Avatar):
             on_keepalive, self.on_keepalive = self.on_keepalive, None
             on_keepalive()
 
+
 class MasterRealm:
+
     def __init__(self, perspective, on_attachment):
         self.perspective = perspective
         self.on_attachment = on_attachment
 
     implements(portal.IRealm)
+
     def requestAvatar(self, avatarId, mind, *interfaces):
         assert pb.IPerspective in interfaces
         self.mind = mind
@@ -53,6 +61,7 @@ class MasterRealm:
         d = defer.succeed(None)
         if self.on_attachment:
             d.addCallback(lambda _: self.on_attachment(mind))
+
         def returnAvatar(_):
             return pb.IPerspective, self.perspective, lambda: None
         d.addCallback(returnAvatar)
@@ -61,7 +70,8 @@ class MasterRealm:
     def shutdown(self):
         return self.mind.broker.transport.loseConnection()
 
-class TestBuildSlave(unittest.TestCase):
+
+class TestBuildSlave(misc.PatcherMixin, unittest.TestCase):
 
     def setUp(self):
         self.realm = None
@@ -73,18 +83,14 @@ class TestBuildSlave(unittest.TestCase):
             shutil.rmtree(self.basedir)
         os.makedirs(self.basedir)
 
-        # the slave tries to call socket.getfqdn to write its hostname; this hangs
-        # without network, so fake it
-        self.patch(socket, "getfqdn", lambda : 'test-hostname.domain.com')
-
     def tearDown(self):
         d = defer.succeed(None)
         if self.realm:
-            d.addCallback(lambda _ : self.realm.shutdown())
+            d.addCallback(lambda _: self.realm.shutdown())
         if self.buildslave and self.buildslave.running:
-            d.addCallback(lambda _ : self.buildslave.stopService())
+            d.addCallback(lambda _: self.buildslave.stopService())
         if self.listeningport:
-            d.addCallback(lambda _ : self.listeningport.stopListening())
+            d.addCallback(lambda _: self.listeningport.stopListening())
         if os.path.exists(self.basedir):
             shutil.rmtree(self.basedir)
         return d
@@ -105,13 +111,13 @@ class TestBuildSlave(unittest.TestCase):
     def test_constructor_083_tac(self):
         # invocation as made from default 083 tac files
         bot.BuildSlave('mstr', 9010, 'me', 'pwd', '/s', 10, False,
-                umask=0123, maxdelay=10)
+                       umask=0123, maxdelay=10)
 
     def test_constructor_full(self):
         # invocation with all args
         bot.BuildSlave('mstr', 9010, 'me', 'pwd', '/s', 10, False,
-                umask=0123, maxdelay=10, keepaliveTimeout=10,
-                unicode_encoding='utf8', allow_shutdown=True)
+                       umask=0123, maxdelay=10, keepaliveTimeout=10,
+                       unicode_encoding='utf8', allow_shutdown=True)
 
     def test_buildslave_print(self):
         d = defer.Deferred()
@@ -126,17 +132,32 @@ class TestBuildSlave(unittest.TestCase):
         persp = MasterPerspective()
         port = self.start_master(persp, on_attachment=call_print)
         self.buildslave = bot.BuildSlave("127.0.0.1", port,
-                "testy", "westy", self.basedir,
-                keepalive=0, usePTY=False, umask=022)
+                                         "testy", "westy", self.basedir,
+                                         keepalive=0, usePTY=False, umask=022)
         self.buildslave.startService()
 
         # and wait for the result of the print
         return d
 
-    def test_recordHostname(self):
+    def test_recordHostname_uname(self):
+        self.patch_os_uname(lambda: [0, 'test-hostname.domain.com'])
+
         self.buildslave = bot.BuildSlave("127.0.0.1", 9999,
-                "testy", "westy", self.basedir,
-                keepalive=0, usePTY=False, umask=022)
+                                         "testy", "westy", self.basedir,
+                                         keepalive=0, usePTY=False, umask=022)
+        self.buildslave.recordHostname(self.basedir)
+        self.assertEqual(open(os.path.join(self.basedir, "twistd.hostname")).read().strip(),
+                         'test-hostname.domain.com')
+
+    def test_recordHostname_getfqdn(self):
+        def missing():
+            raise AttributeError
+        self.patch_os_uname(missing)
+        self.patch(socket, "getfqdn", lambda: 'test-hostname.domain.com')
+
+        self.buildslave = bot.BuildSlave("127.0.0.1", 9999,
+                                         "testy", "westy", self.basedir,
+                                         keepalive=0, usePTY=False, umask=022)
         self.buildslave.recordHostname(self.basedir)
         self.assertEqual(open(os.path.join(self.basedir, "twistd.hostname")).read().strip(),
                          'test-hostname.domain.com')
@@ -148,6 +169,7 @@ class TestBuildSlave(unittest.TestCase):
 
         fakepersp = Mock()
         called = []
+
         def fakeCallRemote(*args):
             called.append(args)
             d1 = defer.succeed(None)
@@ -165,8 +187,8 @@ class TestBuildSlave(unittest.TestCase):
         port = self.start_master(persp, on_attachment=call_shutdown)
 
         self.buildslave = bot.BuildSlave("127.0.0.1", port,
-                "testy", "westy", self.basedir,
-                keepalive=0, usePTY=False, umask=022)
+                                         "testy", "westy", self.basedir,
+                                         keepalive=0, usePTY=False, umask=022)
 
         self.buildslave.startService()
 
@@ -181,9 +203,9 @@ class TestBuildSlave(unittest.TestCase):
         being called."""
 
         buildslave = bot.BuildSlave("127.0.0.1", 1234,
-                "testy", "westy", self.basedir,
-                keepalive=0, usePTY=False, umask=022,
-                allow_shutdown='file')
+                                    "testy", "westy", self.basedir,
+                                    keepalive=0, usePTY=False, umask=022,
+                                    allow_shutdown='file')
 
         # Mock out gracefulShutdown
         buildslave.gracefulShutdown = Mock()
