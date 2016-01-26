@@ -1,3 +1,4 @@
 fix-init-scripts.patch
-deb-bug-657517.patch
+restart-single-instance.patch
+exit-code.patch
 git-submodules.patch
