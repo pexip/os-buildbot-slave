@@ -23,3 +23,26 @@ index b6c80e3..3a81126 100644
          else:
              return defer.succeed(0)
  
+diff --git a/buildslave/test/unit/test_commands_git.py b/buildslave/test/unit/test_commands_git.py
+index 95537a3..c3dfeda 100644
+--- a/buildslave/test/unit/test_commands_git.py
++++ b/buildslave/test/unit/test_commands_git.py
+@@ -621,15 +621,15 @@ class TestGit(SourceCommandTestMixin, unittest.TestCase):
+                    self.basedir_workdir,
+                    sendRC=False, timeout=120, usePTY=False)
+             + 0,
+-            Expect(['path/to/git', 'submodule', 'init'],
++            Expect(['path/to/git', 'submodule', 'sync'],
+                    self.basedir_workdir,
+                    sendRC=False, timeout=120, usePTY=False)
+             + 0,
+-            Expect(['path/to/git', 'submodule', 'update'],
++            Expect(['path/to/git', 'submodule', 'update', '--init', '--recursive'],
+                    self.basedir_workdir,
+                    sendRC=False, timeout=120, usePTY=False)
+             + 0,
+-            Expect(['path/to/git', 'submodule', 'foreach',
++            Expect(['path/to/git', 'submodule', 'foreach', '--recursive',
+                     'git', 'clean', '-f', '-d', '-x'],
+                    self.basedir_workdir,
+                    sendRC=False, timeout=120, usePTY=False)
