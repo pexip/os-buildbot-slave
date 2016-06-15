@@ -1,0 +1,36 @@
+From 1f4a3f3298113b961fd460457be2d522c1350b70 Mon Sep 17 00:00:00 2001
+From: Tom Prince <tom.prince@ualberta.net>
+Date: Wed, 18 Mar 2015 08:12:45 -0600
+Subject: [PATCH] Fix sigtermTime race.
+
+If twisted notices that a process dies between when SIGTERM is sent,
+then RunProcess.process.pid will be None, causing checkDead to fail.
+
+In any case, the timer will be leaked, and it will be cancelled after having
+been called.
+---
+ slave/buildslave/runprocess.py | 3 +++
+ 1 file changed, 3 insertions(+)
+
+[jmb: adjust context for 0.8.9]
+diff --git a/buildslave/runprocess.py b/buildslave/runprocess.py
+index 7d35eb1..1c3ceaf 100644
+--- a/buildslave/runprocess.py
++++ b/buildslave/runprocess.py
+@@ -780,6 +780,8 @@ def doMaxTimeout(self):
+         self.kill(msg)
+ 
+     def isDead(self):
++        if self.process.pid is None:
++            return True
+         pid = int(self.process.pid)
+         try:
+             os.kill(pid, 0)
+@@ -788,6 +790,7 @@ def isDead(self):
+         return False  # alive
+ 
+     def checkProcess(self):
++        self.sigtermTimer = None
+         if not self.isDead():
+             hit = self.sendSig(self.interruptSignal)
+         else:

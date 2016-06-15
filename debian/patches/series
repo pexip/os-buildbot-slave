@@ -2,3 +2,4 @@ fix-init-scripts.patch
 restart-single-instance.patch
 exit-code.patch
 git-submodules.patch
+sigterm-race.patch

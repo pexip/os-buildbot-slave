@@ -1,3 +1,10 @@
+buildbot-slave (0.8.9-2pexip2) pexip; urgency=medium
+
+  * sigterm-race.patch:
+    - backport upstream fix for a race in handling SIGTERM.
+
+ -- John-Mark Bell <jmb@pexip.com>  Mon, 01 Feb 2016 14:32:31 +0000
+
 buildbot-slave (0.8.9-2pexip1) pexip; urgency=medium
 
   * New upstream release
